@@ -71,6 +71,9 @@ var (
 		1007,
 		gopacket.LayerTypeMetadata{
 			Name: "RAKP Message 1",
+			Decoder: layerexts.BuildDecoder(func() layerexts.LayerDecodingLayer {
+				return &RAKPMessage1{}
+			}),
 		},
 	)
 	LayerTypeRAKPMessage2 = gopacket.RegisterLayerType(
@@ -86,6 +89,9 @@ var (
 		1009,
 		gopacket.LayerTypeMetadata{
 			Name: "RAKP Message 3",
+			Decoder: layerexts.BuildDecoder(func() layerexts.LayerDecodingLayer {
+				return &RAKPMessage3{}
+			}),
 		},
 	)
 	LayerTypeRAKPMessage4 = gopacket.RegisterLayerType(
