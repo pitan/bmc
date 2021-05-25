@@ -48,6 +48,14 @@ func (*RAKPMessage1) LayerType() gopacket.LayerType {
 	return LayerTypeRAKPMessage1
 }
 
+func (r *RAKPMessage1) CanDecode() gopacket.LayerClass {
+	return r.LayerType()
+}
+
+func (*RAKPMessage1) NextLayerType() gopacket.LayerType {
+	return gopacket.LayerTypePayload
+}
+
 func (r *RAKPMessage1) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
 	if len(r.Username) > 16 {
 		return fmt.Errorf("Username cannot be more than 16 characters long, got %v", len(r.Username))
@@ -72,6 +80,31 @@ func (r *RAKPMessage1) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.Ser
 	if len(r.Username) > 0 {
 		copy(d[28:], []byte(r.Username))
 	}
+	return nil
+}
+
+func (r *RAKPMessage1) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error {
+	if len(data) < 28 { // minimum in case of no username present
+		df.SetTruncated()
+		return fmt.Errorf("RAKP Message 1 must be at least 28 bytes, got %v", len(data))
+	}
+
+	r.BaseLayer.Contents = data
+	r.Tag = uint8(data[0])
+	// [1:4] reserved
+	r.ManagedSystemSessionID = binary.LittleEndian.Uint32(data[4:8])
+	copy(r.RemoteConsoleRandom[:], data[8:24])
+
+	r.PrivilegeLevelLookup = data[24]&(1<<4) == 0
+	r.MaxPrivilegeLevel = PrivilegeLevel(uint8(data[24] & 0x0f))
+	// [25:27] reserved
+	userNameLength := uint8(data[27])
+	if userNameLength == 0 || 10 < userNameLength {
+		r.Username = ""
+	} else {
+		r.Username = string(data[28 : 28+userNameLength])
+	}
+
 	return nil
 }
 

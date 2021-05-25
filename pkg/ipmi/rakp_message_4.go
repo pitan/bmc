@@ -61,3 +61,25 @@ func (r *RAKPMessage4) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) 
 	}
 	return nil
 }
+
+func (r *RAKPMessage4) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
+	length := 8
+	if r.Status == StatusCodeOK {
+		length += len(r.ICV)
+	}
+	d, err := b.PrependBytes(length)
+	if err != nil {
+		return err
+	}
+	d[0] = r.Tag
+	d[1] = byte(r.Status)
+	d[2] = 0x00
+	d[3] = 0x00
+	binary.LittleEndian.PutUint32(d[4:8], r.RemoteConsoleSessionID)
+	if r.Status == StatusCodeOK {
+		if len(r.ICV) > 0 {
+			copy(d[8:], r.ICV)
+		}
+	}
+	return nil
+}

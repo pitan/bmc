@@ -2,6 +2,7 @@ package ipmi
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -36,6 +37,14 @@ func (*RAKPMessage3) LayerType() gopacket.LayerType {
 	return LayerTypeRAKPMessage3
 }
 
+func (r *RAKPMessage3) CanDecode() gopacket.LayerClass {
+	return r.LayerType()
+}
+
+func (*RAKPMessage3) NextLayerType() gopacket.LayerType {
+	return gopacket.LayerTypePayload
+}
+
 func (r *RAKPMessage3) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
 	length := 8
 	if r.Status == StatusCodeOK {
@@ -52,6 +61,24 @@ func (r *RAKPMessage3) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.Ser
 	binary.LittleEndian.PutUint32(d[4:8], r.ManagedSystemSessionID)
 	if r.Status == StatusCodeOK {
 		copy(d[8:], r.AuthCode)
+	} else {
+		r.AuthCode = nil
+	}
+	return nil
+}
+
+func (r *RAKPMessage3) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error {
+	if len(data) < 8 { // minimum in case of non-zero status code
+		df.SetTruncated()
+		return fmt.Errorf("RAKP Message 3 must be at least 8 bytes, got %v", len(data))
+	}
+	r.BaseLayer.Contents = data
+	r.Tag = uint8(data[0])
+	r.Status = StatusCode(data[1])
+	// [2:4] reserved
+	r.ManagedSystemSessionID = binary.LittleEndian.Uint32(data[4:8])
+	if r.Status == StatusCodeOK && len(data) > 8 {
+		r.AuthCode = data[8:]
 	} else {
 		r.AuthCode = nil
 	}
