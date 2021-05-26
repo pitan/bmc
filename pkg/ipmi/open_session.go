@@ -50,6 +50,14 @@ func (*OpenSessionReq) LayerType() gopacket.LayerType {
 	return LayerTypeOpenSessionReq
 }
 
+func (o *OpenSessionReq) CanDecode() gopacket.LayerClass {
+	return o.LayerType()
+}
+
+func (*OpenSessionReq) NextLayerType() gopacket.LayerType {
+	return gopacket.LayerTypePayload
+}
+
 func (o *OpenSessionReq) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
 	// We make no assumptions about algorithm payload lengths, however in
 	// practice, all sorts of stuff would break on the response side if they
@@ -79,6 +87,93 @@ func (o *OpenSessionReq) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.S
 			return err
 		}
 	}
+	return nil
+}
+
+func (o *OpenSessionReq) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error {
+	if len(data) < 8 { // minimum in case of non-zero status code
+		df.SetTruncated()
+		return fmt.Errorf("RMCP+ Open Session Request must be at least 8 bytes, got %v", len(data))
+	}
+	o.BaseLayer.Contents = data
+
+	o.Tag = uint8(data[0])
+	o.MaxPrivilegeLevel = PrivilegeLevel(data[1])
+	// [2:4] reserved
+	o.SessionID = binary.LittleEndian.Uint32(data[4:8])
+
+	if (len(data)-8)%8 != 0 {
+		df.SetTruncated()
+		return fmt.Errorf("RMCP+ Open Session Request athentication/integrity/confidentiality payload must be each 8 bytes, got %v", len(data)-8)
+	}
+	o.AuthenticationPayloads = []AuthenticationPayload{}
+	o.IntegrityPayloads = []IntegrityPayload{}
+	o.ConfidentialityPayloads = []ConfidentialityPayload{}
+
+	for i := 8; i < len(data); i = i + 8 {
+		payloadType := data[i]
+		wildcard := false
+		if data[i+3] == 0x00 {
+			wildcard = true
+		}
+		switch payloadType {
+		case 0x00: // Authentication Payload
+			algorithm := AuthenticationAlgorithm(data[i+4] & 0x3f)
+			if wildcard {
+				if wildcard && algorithm != AuthenticationAlgorithmNone {
+					return fmt.Errorf("if authentication algorithm is wildcard, concrete algorithm must be None")
+				}
+				if len(o.AuthenticationPayloads) == 0 {
+					o.AuthenticationPayloads = append(o.AuthenticationPayloads, AuthenticationPayload{
+						Wildcard: true,
+					})
+				} else {
+					return fmt.Errorf("wildcard is duplicated. authentication wildcard payload must be just one")
+				}
+			} else {
+				o.AuthenticationPayloads = append(o.AuthenticationPayloads, AuthenticationPayload{
+					Algorithm: algorithm,
+				})
+			}
+		case 0x01: // Integrigy Payload
+			algorithm := IntegrityAlgorithm(data[i+4] & 0x3f)
+			if wildcard {
+				if wildcard && algorithm != IntegrityAlgorithmNone {
+					return fmt.Errorf("if integrity algorithm is wildcard, concrete algorithm must be None")
+				}
+				if len(o.IntegrityPayloads) == 0 {
+					o.IntegrityPayloads = append(o.IntegrityPayloads, IntegrityPayload{
+						Wildcard: true,
+					})
+				} else {
+					return fmt.Errorf("wildcard is duplicated. integrity wildcard payload must be just one")
+				}
+			} else {
+				o.IntegrityPayloads = append(o.IntegrityPayloads, IntegrityPayload{
+					Algorithm: algorithm,
+				})
+			}
+		case 0x02: // Confidentiality Payload
+			algorithm := ConfidentialityAlgorithm(data[i+4] & 0x3f)
+			if wildcard {
+				if wildcard && algorithm != ConfidentialityAlgorithmNone {
+					return fmt.Errorf("if confidentiality algorithm is wildcard, concrete algorithm must be None")
+				}
+				if len(o.ConfidentialityPayloads) == 0 {
+					o.ConfidentialityPayloads = append(o.ConfidentialityPayloads, ConfidentialityPayload{
+						Wildcard: true,
+					})
+				} else {
+					return fmt.Errorf("wildcard is duplicated. confidentiality wildcard payload must be just one")
+				}
+			} else {
+				o.ConfidentialityPayloads = append(o.ConfidentialityPayloads, ConfidentialityPayload{
+					Algorithm: algorithm,
+				})
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -138,6 +233,35 @@ func (o *OpenSessionRsp) CanDecode() gopacket.LayerClass {
 
 func (*OpenSessionRsp) NextLayerType() gopacket.LayerType {
 	return gopacket.LayerTypePayload
+}
+func (o *OpenSessionRsp) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
+	// We make no assumptions about algorithm payload lengths, however in
+	// practice, all sorts of stuff would break on the response side if they
+	// were not all 12 bytes. Fortunately, this does not look likely to ever
+	// change.
+	d, err := b.PrependBytes(12)
+	if err != nil {
+		return err
+	}
+	d[0] = o.Tag
+	d[1] = byte(o.Status)
+	d[2] = uint8(o.MaxPrivilegeLevel) & 0xF
+	d[3] = 0x00
+	binary.LittleEndian.PutUint32(d[4:8], o.RemoteConsoleSessionID)
+	binary.LittleEndian.PutUint32(d[8:12], o.ManagedSystemSessionID)
+
+	if o.Status == StatusCodeOK {
+		if err := o.AuthenticationPayload.Serialise(b); err != nil {
+			return err
+		}
+		if err := o.IntegrityPayload.Serialise(b); err != nil {
+			return err
+		}
+		if err := o.ConfidentialityPayload.Serialise(b); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (o *OpenSessionRsp) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error {

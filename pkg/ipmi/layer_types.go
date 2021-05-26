@@ -56,6 +56,9 @@ var (
 		1005,
 		gopacket.LayerTypeMetadata{
 			Name: "RMCP+ Open Session Request",
+			Decoder: layerexts.BuildDecoder(func() layerexts.LayerDecodingLayer {
+				return &OpenSessionReq{}
+			}),
 		},
 	)
 	LayerTypeOpenSessionRsp = gopacket.RegisterLayerType(
